@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hue-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_METASTORE_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_METASTORE_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  mysql:
+    image: mysql:8.0
+    container_name: hue-mysql
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: ${TZ}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MYSQL_USER} -p${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  hue:
+    build:
+      context: ./hue
+      dockerfile: Dockerfile
+    container_name: hue
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ}
+      HUE_DB_HOST: postgres
+      HUE_DB_PORT: 5432
+      HUE_ADMIN_USER: ${HUE_ADMIN_USER}
+      HUE_ADMIN_PASSWORD: ${HUE_ADMIN_PASSWORD}
+      HUE_ADMIN_EMAIL: ${HUE_ADMIN_EMAIL}
+      IMPALA_HOST: ${IMPALA_HOST}
+      IMPALA_PORT: ${IMPALA_PORT}
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./hue/hue.ini:/usr/share/hue/desktop/conf/z-hue.ini:ro
+      - hue_logs:/usr/share/hue/logs
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/share/hue/build/env/bin/python -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', 8888)); s.close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  postgres_data:
+  mysql_data:
+  hue_logs:
